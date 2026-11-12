@@ -87,6 +87,20 @@ export class Fork {
         return new Mtk.Rectangle({ x, y, width, height });
     }
 
+    /**
+     * Limits the position of the divider of this fork so that neither side is smaller than its windows can be.
+     *
+     * The position is returned as it was if the windows cannot all fit.
+     */
+    clamp_length(tiler: Forest, ext: Ext, length: number): number {
+        if (!this.right) return length;
+
+        const horizontal = this.is_horizontal();
+        const min = this.left.min_length(tiler, ext, horizontal) + ext.gap_inner_half;
+        const max = this.length() - this.right.min_length(tiler, ext, horizontal) - ext.gap_inner_half;
+        return min > max ? length : Math.max(min, Math.min(max, length));
+    }
+
     depth(): number {
         return this.is_horizontal() ? this.area.height : this.area.width;
     }
@@ -124,6 +138,16 @@ export class Fork {
 
     length(): number {
         return this.is_horizontal() ? this.area.width : this.area.height;
+    }
+
+    /** The smallest width (or height) that the windows in this fork can be laid out in */
+    min_length(tiler: Forest, ext: Ext, horizontal: boolean): number {
+        const left = this.left.min_length(tiler, ext, horizontal);
+        if (!this.right) return left;
+
+        const right = this.right.min_length(tiler, ext, horizontal);
+        // Windows next to each other along the axis add up. Windows across it only need the larger of the two.
+        return this.is_horizontal() === horizontal ? left + right + ext.gap_inner_half * 2 : Math.max(left, right);
     }
 
     /** Replaces the association of a window in a fork with another */
@@ -259,6 +283,10 @@ export class Fork {
                 length = this.length_left - diff + (diff > 16 ? 32 : 0);
                 if (length == 0) length = 32;
             }
+
+            // Windows that cannot shrink pass the pressure on to the windows beside them.
+            // The ratio is kept as it was, so that the windows regain their space when the pressure is gone.
+            length = this.clamp_length(tiler, ext, length);
 
             region[l] = length - ext.gap_inner_half;
 

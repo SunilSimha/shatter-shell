@@ -717,7 +717,7 @@ export class Forest extends Ecs.World {
 
     /** Readjusts the division of space between the left and right siblings of a fork */
     private readjust_fork_ratio_by_left(ext: Ext, left_length: number, fork: Fork.Fork) {
-        fork.set_ratio(left_length).measure(this, ext, fork.area, this.on_record());
+        fork.set_ratio(fork.clamp_length(this, ext, left_length)).measure(this, ext, fork.area, this.on_record());
     }
 
     /** Readjusts the division of space between the left and right siblings of a fork
@@ -812,7 +812,7 @@ export class Forest extends Ecs.World {
             length = is_left ? crect.y + crect.height - child.area.y : child.area.height - crect.height;
         }
 
-        child.set_ratio(length);
+        child.set_ratio(child.clamp_length(this, ext, length));
 
         child.measure(this, ext, child.area, this.on_record());
     }

@@ -208,6 +208,22 @@ export class Node<T extends NodeADT = NodeADT> {
         return this.inner.kind === NodeKind.WINDOW && Ecs.entity_eq(this.inner.entity, entity);
     }
 
+    /** The smallest width (or height) that the windows in this node can be laid out in */
+    min_length(tiler: Forest, ext: Ext, horizontal: boolean): number {
+        const window_min = (entity: Entity) => ext.windows.get(entity)?.min_frame_size()[horizontal ? 0 : 1] ?? 0;
+
+        switch (this.inner.kind) {
+            case NodeKind.FORK:
+                return tiler.forks.get(this.inner.entity)?.min_length(tiler, ext, horizontal) ?? 0;
+            case NodeKind.WINDOW:
+                return window_min(this.inner.entity);
+            case NodeKind.STACK:
+                // Only one window of a stack is shown at a time, below the tabs
+                const tab_height = horizontal ? 0 : ext.dpi * TAB_HEIGHT_UNSCALED;
+                return Math.max(0, ...this.inner.entities.map(window_min)) + tab_height;
+        }
+    }
+
     /** Calculates the future arrangement of windows in this node */
     measure(
         tiler: Forest,

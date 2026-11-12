@@ -279,6 +279,23 @@ export class ShellWindow {
         return this.meta.get_transient_for() !== null;
     }
 
+    /**
+     * The smallest size that the frame of this window can have.
+     *
+     * The minimum size that a window reports includes any client-side shadow, which the frame does not.
+     */
+    min_frame_size(): [number, number] {
+        const [known, width, height] = this.meta.get_min_size();
+        if (!known) return [0, 0];
+
+        const frame = this.meta.get_frame_rect();
+        const buffer = this.meta.get_buffer_rect();
+        return [
+            Math.max(0, width - (buffer.width - frame.width)),
+            Math.max(0, height - (buffer.height - frame.height)),
+        ];
+    }
+
     move(rect: Mtk.Rectangle, on_complete?: () => void) {
         if (!this.same_workspace() && this.is_maximized()) {
             return;
