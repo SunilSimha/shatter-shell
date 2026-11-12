@@ -249,7 +249,10 @@ export class Fork {
             const half = this.area[l] / 2;
 
             let length;
-            if (this.length_left > half - 32 && this.length_left < half + 32) {
+            if (ext.live_resizing) {
+                // Follow the dragged window exactly. Snapping would make its neighbours lag behind it.
+                length = this.length_left;
+            } else if (this.length_left > half - 32 && this.length_left < half + 32) {
                 length = half;
             } else {
                 const diff = (startpos + this.length_left) % 32;
