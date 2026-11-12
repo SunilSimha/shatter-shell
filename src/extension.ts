@@ -1147,11 +1147,11 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
 
         const crect = win.rect();
-        const movement = grab_op.operation(crect);
+        const movements = grab_op.axis_movements(crect);
 
         // A click on a resize edge can begin and end a grab without
         // changing the window. Do not turn that into a tree resize.
-        if (movement === Movement.NONE) return;
+        if (movements.length === 0) return;
 
         if (win.stack != null) {
             const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
@@ -1164,10 +1164,12 @@ export class Ext extends Ecs.System<ExtEvent> {
             clampRect(crect, forest.forks.get(top_level)!.area);
         }
 
-        if (this.movement_is_valid(win, movement)) {
+        if (movements.every(movement => this.movement_is_valid(win, movement))) {
             this.live_resizing = live;
             try {
-                forest.resize(this, fork_entity, fork, win.entity, movement, crect);
+                for (const movement of movements) {
+                    forest.resize(this, fork_entity, fork, win.entity, movement, crect);
+                }
             } finally {
                 this.live_resizing = false;
             }
