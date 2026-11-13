@@ -90,7 +90,7 @@ export class Fork {
     /**
      * Limits the position of the divider of this fork so that neither side is smaller than its windows can be.
      *
-     * The position is returned as it was if the windows cannot all fit.
+     * If the windows cannot all fit, the position is only kept inside the fork.
      */
     clamp_length(tiler: Forest, ext: Ext, length: number): number {
         if (!this.right) return length;
@@ -98,7 +98,9 @@ export class Fork {
         const horizontal = this.is_horizontal();
         const min = this.left.min_length(tiler, ext, horizontal) + ext.gap_inner_half;
         const max = this.length() - this.right.min_length(tiler, ext, horizontal) - ext.gap_inner_half;
-        return min > max ? length : Math.max(min, Math.min(max, length));
+        if (min > max) return Math.max(0, Math.min(this.length(), length));
+
+        return Math.max(min, Math.min(max, length));
     }
 
     depth(): number {
@@ -241,11 +243,15 @@ export class Fork {
         record: (win: Entity, parent: Entity, area: Mtk.Rectangle) => void,
     ) {
         let ratio = null;
+        let pinned = false;
 
         const manually_moved = ext.grab_op !== null || ext.tiler.resizing_window;
 
         if (!this.is_toplevel) {
-            if (this.orientation_changed) {
+            const old_area = this.area;
+            const reoriented = this.orientation_changed;
+
+            if (reoriented) {
                 this.orientation_changed = false;
                 ratio = this.length_left / this.depth();
             } else {
@@ -253,6 +259,10 @@ export class Fork {
             }
 
             this.area = this.set_area(area.copy());
+
+            // While dragging, a divider that is not next to the dragged edge stays where it is
+            pinned = ext.drag_resizing && !reoriented && this.pin_divider(old_area);
+            if (pinned) ratio = null;
         } else if (this.orientation_changed) {
             this.orientation_changed = false;
             ratio = this.length_left / this.depth();
@@ -273,8 +283,9 @@ export class Fork {
             const half = this.area[l] / 2;
 
             let length;
-            if (ext.live_resizing) {
-                // Follow the dragged window exactly. Snapping would make its neighbours lag behind it.
+            if (ext.live_resizing || pinned) {
+                // Follow the dragged window exactly. Snapping would make its neighbours lag behind it,
+                // and would move a pinned divider.
                 length = this.length_left;
             } else if (this.length_left > half - 32 && this.length_left < half + 32) {
                 length = half;
@@ -299,6 +310,25 @@ export class Fork {
         } else {
             this.left.measure(tiler, ext, this.entity, this.area, record);
         }
+    }
+
+    /**
+     * Keeps the divider where it is if only one edge of the area has moved from `old_area`.
+     *
+     * Only the side next to the moved edge then changes size, instead of both sides changing in proportion.
+     * Returns false, and leaves the divider alone, if both edges or neither have moved.
+     */
+    private pin_divider(old_area: Mtk.Rectangle): boolean {
+        const horizontal = this.is_horizontal();
+        const start = horizontal ? this.area.x - old_area.x : this.area.y - old_area.y;
+        const end = horizontal
+            ? this.area.x + this.area.width - (old_area.x + old_area.width)
+            : this.area.y + this.area.height - (old_area.y + old_area.height);
+
+        if ((start !== 0) === (end !== 0)) return false;
+
+        this.length_left -= start;
+        return true;
     }
 
     migrate(ext: Ext, forest: Forest, area: Mtk.Rectangle, monitor: MonitorID, workspace: WorkspaceID) {

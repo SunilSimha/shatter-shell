@@ -164,6 +164,9 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Set while re-tiling during a mouse resize, so that `Fork.measure` does not snap to the grid */
     live_resizing: boolean = false;
 
+    /** Set while the tree is resized to a window that was resized with the mouse, so that `Fork.measure` keeps dividers in place */
+    drag_resizing: boolean = false;
+
     /** A display config update is triggered on a workspace addition */
     ignore_display_update: boolean = false;
 
@@ -1166,12 +1169,14 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         if (movements.every(movement => this.movement_is_valid(win, movement))) {
             this.live_resizing = live;
+            this.drag_resizing = true;
             try {
                 for (const movement of movements) {
                     forest.resize(this, fork_entity, fork, win.entity, movement, crect);
                 }
             } finally {
                 this.live_resizing = false;
+                this.drag_resizing = false;
             }
 
             if (live) forest.requested.delete(win.entity);
