@@ -2126,6 +2126,7 @@ export class Ext extends Ecs.System<ExtEvent> {
             this.grab_op = null;
         }
 
+        this.auto_tiler?.forest.end_pushes();
         this.moved_by_mouse = false;
     }
 

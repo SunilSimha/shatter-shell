@@ -37,6 +37,9 @@ export class Fork {
     orientation_changed: boolean = false;
     is_toplevel: boolean = false;
 
+    /** The position of the divider before it was pushed by a resize of the current drag, if it was */
+    pushed_from: number | null = null;
+
     smart_gapped: boolean = false;
 
     /** Tracks toggle count so that we may swap branches when toggled twice */

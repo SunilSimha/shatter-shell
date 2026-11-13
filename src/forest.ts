@@ -60,6 +60,9 @@ export class Forest extends Ecs.World {
     /** Stores window positions that have been requested. */
     requested: Map<Entity, Request> = new Map();
 
+    /** The forks whose divider was pushed by the current drag, which remember where it was */
+    pushed: Set<Fork.Fork> = new Set();
+
     /** Stores stacks which must have their containers redrawn */
     stack_updates: Array<[Node.NodeStack, Entity]> = [];
 
@@ -619,20 +622,34 @@ export class Forest extends Ecs.World {
      * edge, e.g. if it is also the edge of the screen.
      */
     divider_fork(fork_entity: Entity, win: Entity, edge: movement.Edge): Fork.Fork | null {
-        const horizontal = edge === 'left' || edge === 'right';
+        const in_left = (fork: Fork.Fork) => fork.left.is_window(win) || fork.left.is_in_stack(win);
         // A divider at the right (or bottom) edge has the window in its left (or top) child
-        const in_left_child = edge === 'right' || edge === 'bottom';
+        return this.divider_above(
+            fork_entity,
+            in_left,
+            edge === 'left' || edge === 'right',
+            edge === 'right' || edge === 'bottom',
+        );
+    }
 
+    /**
+     * The first fork from `entity` upwards that is split along an axis and has the node that the search comes
+     * from in its left (or top) child, or in its right (or bottom) child. `in_left` tells whether that node is in
+     * the left child of the first fork. For the next ones it is the fork that was left behind.
+     */
+    private divider_above(
+        entity: Entity | null,
+        in_left: (fork: Fork.Fork) => boolean,
+        horizontal: boolean,
+        in_left_child: boolean,
+    ): Fork.Fork | null {
         let child: Entity | null = null;
-        let entity: Entity | null = fork_entity;
         while (entity) {
             const fork = this.forks.get(entity);
             if (!fork) return null;
 
             if (fork.right && fork.is_horizontal() === horizontal) {
-                const is_left = child
-                    ? fork.left.is_fork(child)
-                    : fork.left.is_window(win) || fork.left.is_in_stack(win);
+                const is_left = child ? fork.left.is_fork(child) : in_left(fork);
                 if (is_left === in_left_child) return fork;
             }
 
@@ -653,9 +670,93 @@ export class Forest extends Ecs.World {
         if (!fork) return false;
 
         const position = { left: crect.x, right: crect.x + crect.width, top: crect.y, bottom: crect.y + crect.height };
-        const length = position[edge] - (fork.is_horizontal() ? fork.area.x : fork.area.y);
-        fork.set_ratio(fork.clamp_length(this, ext, length)).measure(this, ext, fork.area, this.on_record());
+        this.move_divider(ext, fork, position[edge]);
         return true;
+    }
+
+    /**
+     * Moves the divider of a fork to a position.
+     *
+     * Windows that cannot shrink hold the divider back. The rest is passed on to the divider beyond the fork, which
+     * moves the edge of the area of the fork, so that the windows beyond it, which may be able to shrink, make room.
+     * That divider can be held back in turn. When the divider goes back, the dividers that were pushed follow it.
+     */
+    private move_divider(ext: Ext, fork: Fork.Fork, position: number) {
+        const horizontal = fork.is_horizontal();
+        const start = () => (horizontal ? fork.area.x : fork.area.y);
+
+        const excess = position - start() - fork.clamp_length(this, ext, position - start());
+        if (excess !== 0) {
+            // A divider that goes towards the end of the area pushes the end of it, which is the divider of the fork
+            // beyond it if this fork is in its left child. Towards the start, it is the other way around.
+            const beyond = this.divider_beyond(fork, excess > 0);
+            if (beyond) {
+                const end = horizontal ? fork.area.x + fork.area.width : fork.area.y + fork.area.height;
+                const edge = excess > 0 ? end + ext.gap_inner_half : start() - ext.gap_inner_half;
+                if (beyond.pushed_from === null) {
+                    beyond.pushed_from = edge;
+                    this.pushed.add(beyond);
+                }
+
+                this.move_divider(ext, beyond, edge + excess);
+            }
+        } else {
+            this.retract_pushes(ext, fork, position);
+        }
+
+        // The area of the fork may have changed
+        fork.set_ratio(fork.clamp_length(this, ext, position - start())).measure(
+            this,
+            ext,
+            fork.area,
+            this.on_record(),
+        );
+    }
+
+    /** The divider beyond the end (or the start) of the area of a fork, if the area is in its left (or right) child */
+    private divider_beyond(fork: Fork.Fork, towards_end: boolean): Fork.Fork | null {
+        return this.divider_above(
+            this.parents.get(fork.entity),
+            f => f.left.is_fork(fork.entity),
+            fork.is_horizontal(),
+            towards_end,
+        );
+    }
+
+    /**
+     * Moves the dividers beyond a fork back where they were before they were pushed, as far as the fork allows
+     * with its divider at `position`.
+     */
+    private retract_pushes(ext: Ext, fork: Fork.Fork, position: number) {
+        const horizontal = fork.is_horizontal();
+        const gap = ext.gap_inner_half;
+
+        for (const towards_end of [true, false]) {
+            const beyond = this.divider_beyond(fork, towards_end);
+            if (!beyond || beyond.pushed_from === null) continue;
+
+            const end = horizontal ? fork.area.x + fork.area.width : fork.area.y + fork.area.height;
+            const current = towards_end ? end + gap : (horizontal ? fork.area.x : fork.area.y) - gap;
+            // The divider beyond goes back to where it was, but not so far that the windows next to the divider of the
+            // fork on that side would no longer fit
+            const room = towards_end
+                ? position + (fork.right?.min_length(this, ext, horizontal) ?? 0) + gap * 2
+                : position - fork.left.min_length(this, ext, horizontal) - gap * 2;
+            const target = towards_end ? Math.max(beyond.pushed_from, room) : Math.min(beyond.pushed_from, room);
+
+            if (towards_end ? target < current : target > current) this.move_divider(ext, beyond, target);
+            if (target === beyond.pushed_from) this.forget_push(beyond);
+        }
+    }
+
+    private forget_push(fork: Fork.Fork) {
+        fork.pushed_from = null;
+        this.pushed.delete(fork);
+    }
+
+    /** Forgets where the dividers were before they were pushed, at the end of a drag */
+    end_pushes() {
+        for (const fork of this.pushed) this.forget_push(fork);
     }
 
     /** Higher order function which forwards record events to our record method. */
