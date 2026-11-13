@@ -14,11 +14,6 @@ export enum Movement {
 /** An edge of a window */
 export type Edge = 'left' | 'right' | 'top' | 'bottom';
 
-/** Whether a movement is along the horizontal axis (it moves a left or right edge) */
-export function is_horizontal(movement: Movement): boolean {
-    return (movement & (Movement.LEFT | Movement.RIGHT)) !== 0;
-}
-
 /**
  * The edge of a window that a movement moves, or null for a movement that is not a change of one edge.
  *

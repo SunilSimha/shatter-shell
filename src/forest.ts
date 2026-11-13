@@ -612,13 +612,13 @@ export class Forest extends Ecs.World {
     }
 
     /**
-     * Whether another node lies beyond an edge of a window, so that moving the edge moves a divider.
+     * The fork with the divider that is next to an edge of a window.
      *
-     * Walks up the tree from the fork of the window, looking for a fork that is split along the axis of
-     * the edge and has the window on the side of that edge. The window is not next to another one on that
-     * side otherwise, e.g. its left edge is also the edge of the screen.
+     * Walks up the tree from the fork of the window, looking for the first fork that is split along the axis of
+     * the edge and has the window on the side of that edge. There is none if no other window lies beyond the
+     * edge, e.g. if it is also the edge of the screen.
      */
-    has_divider(fork_entity: Entity, win: Entity, edge: movement.Edge): boolean {
+    divider_fork(fork_entity: Entity, win: Entity, edge: movement.Edge): Fork.Fork | null {
         const horizontal = edge === 'left' || edge === 'right';
         // A divider at the right (or bottom) edge has the window in its left (or top) child
         const in_left_child = edge === 'right' || edge === 'bottom';
@@ -627,20 +627,35 @@ export class Forest extends Ecs.World {
         let entity: Entity | null = fork_entity;
         while (entity) {
             const fork = this.forks.get(entity);
-            if (!fork) return false;
+            if (!fork) return null;
 
             if (fork.right && fork.is_horizontal() === horizontal) {
                 const is_left = child
                     ? fork.left.is_fork(child)
                     : fork.left.is_window(win) || fork.left.is_in_stack(win);
-                if (is_left === in_left_child) return true;
+                if (is_left === in_left_child) return fork;
             }
 
             child = entity;
             entity = this.parents.get(entity);
         }
 
-        return false;
+        return null;
+    }
+
+    /**
+     * Moves the divider next to an edge of a window to where the edge is now.
+     *
+     * Returns false if there is no such divider.
+     */
+    resize_edge(ext: Ext, fork_entity: Entity, win: Entity, edge: movement.Edge, crect: Mtk.Rectangle): boolean {
+        const fork = this.divider_fork(fork_entity, win, edge);
+        if (!fork) return false;
+
+        const position = { left: crect.x, right: crect.x + crect.width, top: crect.y, bottom: crect.y + crect.height };
+        const length = position[edge] - (fork.is_horizontal() ? fork.area.x : fork.area.y);
+        fork.set_ratio(fork.clamp_length(this, ext, length)).measure(this, ext, fork.area, this.on_record());
+        return true;
     }
 
     /** Higher order function which forwards record events to our record method. */

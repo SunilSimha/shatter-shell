@@ -1154,15 +1154,10 @@ export class Ext extends Ecs.System<ExtEvent> {
         // changing the window. Do not turn that into a tree resize.
         if (movements.length === 0) return;
 
-        // The start rect of the grab, to take the axes that are not resized from
-        const rect = grab_op.rect.copy();
-
         if (win.stack != null) {
             const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
-            for (const r of [crect, rect]) {
-                r.height += tab_dimension;
-                r.y -= tab_dimension;
-            }
+            crect.height += tab_dimension;
+            crect.y -= tab_dimension;
         }
 
         const top_level = forest.find_toplevel(this.workspace_id());
@@ -1170,35 +1165,22 @@ export class Ext extends Ecs.System<ExtEvent> {
             clampRect(crect, forest.forks.get(top_level)!.area);
         }
 
-        // An edge can only be resized if there is another window beyond it. If it is the edge of the screen,
-        // that part of the change is ignored, and the other axis is still resized.
-        const valid = movements.filter(m => {
-            const edge = movement.moved_edge(m);
-            return edge !== null && forest.has_divider(fork_entity, win.entity, edge);
-        });
-
-        if (valid.length > 0) {
-            if (valid.some(movement.is_horizontal)) {
-                rect.x = crect.x;
-                rect.width = crect.width;
+        // Move the divider next to each edge that was resized. An edge that has no other window beyond it,
+        // such as the edge of the screen, is ignored, and the other axis is still resized.
+        let resized = false;
+        this.live_resizing = live;
+        this.drag_resizing = true;
+        try {
+            for (const m of movements) {
+                const edge = movement.moved_edge(m);
+                if (edge !== null && forest.resize_edge(this, fork_entity, win.entity, edge, crect)) resized = true;
             }
+        } finally {
+            this.live_resizing = false;
+            this.drag_resizing = false;
+        }
 
-            if (valid.some(m => !movement.is_horizontal(m))) {
-                rect.y = crect.y;
-                rect.height = crect.height;
-            }
-
-            this.live_resizing = live;
-            this.drag_resizing = true;
-            try {
-                for (const m of valid) {
-                    forest.resize(this, fork_entity, fork, win.entity, m, rect);
-                }
-            } finally {
-                this.live_resizing = false;
-                this.drag_resizing = false;
-            }
-
+        if (resized) {
             if (live) forest.requested.delete(win.entity);
             forest.arrange(this, fork.workspace);
         } else if (!live) {
