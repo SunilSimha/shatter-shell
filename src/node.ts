@@ -220,7 +220,7 @@ export class Node<T extends NodeADT = NodeADT> {
             case NodeKind.STACK:
                 // Only one window of a stack is shown at a time, below the tabs
                 const tab_height = horizontal ? 0 : ext.dpi * TAB_HEIGHT_UNSCALED;
-                return Math.max(0, ...this.inner.entities.map(window_min)) + tab_height;
+                return Math.max(...this.inner.entities.map(window_min)) + tab_height;
         }
     }
 

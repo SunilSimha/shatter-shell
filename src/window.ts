@@ -290,7 +290,7 @@ export class ShellWindow {
 
         const frame = this.meta.get_frame_rect();
         const buffer = this.meta.get_buffer_rect();
-        // The buffer of a window that has not committed yet can be smaller than its frame
+        // The buffer of a window that has not committed yet is smaller than its frame
         const shadow_width = Math.max(0, buffer.width - frame.width);
         const shadow_height = Math.max(0, buffer.height - frame.height);
         return [Math.max(0, width - shadow_width), Math.max(0, height - shadow_height)];

@@ -17,7 +17,6 @@ import { Fork } from './fork.js';
 import * as GrabOp from './grab_op.js';
 import * as Keybindings from './keybindings.js';
 import * as Lib from './lib.js';
-import * as movement from './movement.js';
 import * as node from './node.js';
 import * as PanelSettings from './panel_settings.js';
 import * as Settings from './settings.js';
@@ -156,13 +155,13 @@ export class Ext extends Ecs.System<ExtEvent> {
     /** Information about a current possible grab operation */
     grab_op: GrabOp.GrabOp | null = null;
 
-    /** Connected to the grabbed window while it is being resized with the mouse, to re-tile its neighbours live */
+    /** Re-tiles the neighbours of the window that is being resized with the mouse */
     live_resize_signal: SignalID | null = null;
 
-    /** Set while re-tiling during a mouse resize, so that `Fork.measure` does not snap to the grid */
+    /** Set while the neighbours are re-tiled during a mouse resize: no grid snap */
     live_resizing: boolean = false;
 
-    /** Set while the tree is resized to a window that was resized with the mouse, so that `Fork.measure` keeps dividers in place */
+    /** Set while the tree is resized to a window that was resized with the mouse: see `Fork.pin_divider` */
     drag_resizing: boolean = false;
 
     /** A display config update is triggered on a workspace addition */
@@ -307,13 +306,10 @@ export class Ext extends Ecs.System<ExtEvent> {
                         break;
 
                     case WindowEventType.Size:
-                        // During a grab, the live resize keeps the tree up to date. A reflow would also move the grabbed window.
-                        if (
-                            this.auto_tiler
-                            && this.grab_op === null
-                            && !win.is_maximized()
-                            && !win.meta.is_fullscreen()
-                        ) {
+                        // During a grab the live resize keeps the tree current; a reflow would move the grabbed window
+                        if (this.grab_op) break;
+
+                        if (this.auto_tiler && !win.is_maximized() && !win.meta.is_fullscreen()) {
                             this.auto_tiler.reflow(this, win.entity);
                         }
                         break;
@@ -1124,11 +1120,9 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     /**
-     * Resizes the tiling tree to match the size of a window being resized with the mouse,
-     * then moves the affected windows into place.
-     *
-     * If `live`, the grab is still in progress and Mutter is resizing the grabbed window,
-     * so only the other windows are moved and nothing is snapped to the grid.
+     * Resizes the tiling tree to a window that is resized with the mouse, and moves the affected windows into place.
+     * If `live`, the grab is going on: Mutter resizes the grabbed window, so only the others
+     * are moved, without the grid snap.
      */
     resize_tree_to_window(win: Window.ShellWindow, live: boolean) {
         const grab_op = this.grab_op;
@@ -1144,11 +1138,10 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
 
         const crect = win.rect();
-        const movements = grab_op.axis_movements(crect);
+        const moved = grab_op.moved_edges(crect);
 
-        // A click on a resize edge can begin and end a grab without
-        // changing the window. Do not turn that into a tree resize.
-        if (movements.length === 0) return;
+        // A click on a resize edge can begin and end a grab without changing the window
+        if (moved.length === 0) return;
 
         if (win.stack != null) {
             const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
@@ -1161,16 +1154,12 @@ export class Ext extends Ecs.System<ExtEvent> {
             clampRect(crect, forest.forks.get(top_level)!.area);
         }
 
-        // Move the divider next to each edge that was resized. An edge that has no other window beyond it,
-        // such as the edge of the screen, is ignored, and the other axis is still resized.
+        // Move the divider next to each edge that was resized, unless no other window lies beyond it
         let resized = false;
         this.live_resizing = live;
         this.drag_resizing = true;
         try {
-            for (const m of movements) {
-                const edge = movement.moved_edge(m);
-                if (edge !== null && forest.resize_edge(this, fork_entity, win.entity, edge, crect)) resized = true;
-            }
+            resized = moved.map(edge => forest.resize_edge(this, fork_entity, win.entity, edge, crect)).includes(true);
         } finally {
             this.live_resizing = false;
             this.drag_resizing = false;

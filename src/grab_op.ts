@@ -3,6 +3,7 @@ import Mtk from 'gi://Mtk';
 import type { Entity } from './ecs.js';
 
 import * as Movement from './movement.js';
+import { edges, type Edge } from './rectangle.js';
 
 export class GrabOp {
     entity: Entity;
@@ -17,22 +18,9 @@ export class GrabOp {
         return Movement.calculate(this.rect, change);
     }
 
-    /**
-     * The horizontal, then the vertical, part of a change to the rect that actually changed.
-     *
-     * A diagonal change has no single direction (see {@link Movement.calculate}),
-     * so it has to be resized one axis at a time.
-     */
-    axis_movements(change: Mtk.Rectangle): Movement.Movement[] {
-        const horizontal = new Mtk.Rectangle({
-            x: change.x,
-            y: this.rect.y,
-            width: change.width,
-            height: this.rect.height,
-        });
-
-        return [Movement.calculate(this.rect, horizontal), Movement.calculate(horizontal, change)].filter(
-            movement => movement !== Movement.Movement.NONE,
-        );
+    /** The edges of the start rect that `change` has moved */
+    moved_edges(change: Mtk.Rectangle): Edge[] {
+        const [before, after] = [edges(this.rect), edges(change)];
+        return (['left', 'right', 'top', 'bottom'] as const).filter(edge => before[edge] !== after[edge]);
     }
 }

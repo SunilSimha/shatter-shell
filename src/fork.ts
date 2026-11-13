@@ -37,7 +37,7 @@ export class Fork {
     orientation_changed: boolean = false;
     is_toplevel: boolean = false;
 
-    /** The position of the divider before it was pushed by a resize of the current drag, if it was */
+    /** Where the divider was before the current drag pushed it */
     pushed_from: number | null = null;
 
     smart_gapped: boolean = false;
@@ -90,11 +90,7 @@ export class Fork {
         return new Mtk.Rectangle({ x, y, width, height });
     }
 
-    /**
-     * Limits the position of the divider of this fork so that neither side is smaller than its windows can be.
-     *
-     * If the windows cannot all fit, the position is only kept inside the fork.
-     */
+    /** Keeps the divider where neither side is smaller than its windows can be, or else inside the fork */
     clamp_length(tiler: Forest, ext: Ext, length: number): number {
         if (!this.right) return length;
 
@@ -143,6 +139,11 @@ export class Fork {
 
     length(): number {
         return this.is_horizontal() ? this.area.width : this.area.height;
+    }
+
+    /** The start and the end of the area along the axis of the divider */
+    span(area = this.area): [number, number] {
+        return this.is_horizontal() ? [area.x, area.x + area.width] : [area.y, area.y + area.height];
     }
 
     /** The smallest width (or height) that the windows in this fork can be laid out in */
@@ -251,9 +252,8 @@ export class Fork {
 
         if (!this.is_toplevel) {
             const old_area = this.area;
-            const reoriented = this.orientation_changed;
 
-            if (reoriented) {
+            if (this.orientation_changed) {
                 this.orientation_changed = false;
                 ratio = this.length_left / this.depth();
             } else {
@@ -263,7 +263,7 @@ export class Fork {
             this.area = this.set_area(area.copy());
 
             // While dragging, a divider that is not next to the dragged edge stays where it is
-            if (ext.drag_resizing && !reoriented && this.pin_divider(old_area)) ratio = null;
+            if (ext.drag_resizing && this.pin_divider(old_area)) ratio = null;
         } else if (this.orientation_changed) {
             this.orientation_changed = false;
             ratio = this.length_left / this.depth();
@@ -312,22 +312,13 @@ export class Fork {
         }
     }
 
-    /**
-     * Keeps the divider where it is if only one edge of the area has moved from `old_area`.
-     *
-     * Only the side next to the moved edge then changes size, instead of both sides changing in proportion.
-     * Returns false, and leaves the divider alone, if both edges or neither have moved.
-     */
+    /** Keeps the divider where it is if only one edge of the area moved from `old_area`; true if it did */
     private pin_divider(old_area: Mtk.Rectangle): boolean {
-        const horizontal = this.is_horizontal();
-        const start = horizontal ? this.area.x - old_area.x : this.area.y - old_area.y;
-        const end = horizontal
-            ? this.area.x + this.area.width - (old_area.x + old_area.width)
-            : this.area.y + this.area.height - (old_area.y + old_area.height);
+        const [start, end] = this.span();
+        const [old_start, old_end] = this.span(old_area);
+        if ((start !== old_start) === (end !== old_end)) return false;
 
-        if ((start !== 0) === (end !== 0)) return false;
-
-        this.length_left -= start;
+        this.length_left -= start - old_start;
         return true;
     }
 
