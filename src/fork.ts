@@ -246,7 +246,6 @@ export class Fork {
         record: (win: Entity, parent: Entity, area: Mtk.Rectangle) => void,
     ) {
         let ratio = null;
-        let pinned = false;
 
         const manually_moved = ext.grab_op !== null || ext.tiler.resizing_window;
 
@@ -264,8 +263,7 @@ export class Fork {
             this.area = this.set_area(area.copy());
 
             // While dragging, a divider that is not next to the dragged edge stays where it is
-            pinned = ext.drag_resizing && !reoriented && this.pin_divider(old_area);
-            if (pinned) ratio = null;
+            if (ext.drag_resizing && !reoriented && this.pin_divider(old_area)) ratio = null;
         } else if (this.orientation_changed) {
             this.orientation_changed = false;
             ratio = this.length_left / this.depth();
@@ -286,9 +284,8 @@ export class Fork {
             const half = this.area[l] / 2;
 
             let length;
-            if (ext.live_resizing || pinned) {
-                // Follow the dragged window exactly. Snapping would make its neighbours lag behind it,
-                // and would move a pinned divider.
+            if (ext.live_resizing) {
+                // Follow the dragged window exactly. Snapping would make its neighbours lag behind it.
                 length = this.length_left;
             } else if (this.length_left > half - 32 && this.length_left < half + 32) {
                 length = half;

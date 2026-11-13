@@ -290,10 +290,10 @@ export class ShellWindow {
 
         const frame = this.meta.get_frame_rect();
         const buffer = this.meta.get_buffer_rect();
-        return [
-            Math.max(0, width - (buffer.width - frame.width)),
-            Math.max(0, height - (buffer.height - frame.height)),
-        ];
+        // The buffer of a window that has not committed yet can be smaller than its frame
+        const shadow_width = Math.max(0, buffer.width - frame.width);
+        const shadow_height = Math.max(0, buffer.height - frame.height);
+        return [Math.max(0, width - shadow_width), Math.max(0, height - shadow_height)];
     }
 
     move(rect: Mtk.Rectangle, on_complete?: () => void) {

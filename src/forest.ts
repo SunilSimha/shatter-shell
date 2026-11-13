@@ -754,9 +754,13 @@ export class Forest extends Ecs.World {
         this.pushed.delete(fork);
     }
 
-    /** Forgets where the dividers were before they were pushed, at the end of a drag */
-    end_pushes() {
+    /**
+     * Ends the resize of a drag: forgets where the pushed dividers were, and keeps the divider of every fork inside the fork.
+     * Dividers that stayed where they were while their area moved can lie outside of it, and are laid out clamped.
+     */
+    end_resize(ext: Ext) {
         for (const fork of this.pushed) this.forget_push(fork);
+        for (const fork of this.forks.values()) fork.length_left = fork.clamp_length(this, ext, fork.length_left);
     }
 
     /** Higher order function which forwards record events to our record method. */

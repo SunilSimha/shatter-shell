@@ -1134,16 +1134,12 @@ export class Ext extends Ecs.System<ExtEvent> {
         const grab_op = this.grab_op;
         if (!this.auto_tiler || !grab_op) return;
 
-        const fork_entity = this.auto_tiler.attached.get(win.entity);
-        if (!fork_entity) {
-            Log.error(`no fork entity found`);
-            return;
-        }
-
         const forest = this.auto_tiler.forest;
-        const fork = forest.forks.get(fork_entity);
-        if (!fork) {
-            Log.error(`no fork component found`);
+        const fork_entity = this.auto_tiler.attached.get(win.entity);
+        const fork = fork_entity && forest.forks.get(fork_entity);
+        if (!fork_entity || !fork) {
+            // A window that was detached during the grab has none, for every frame
+            if (!live) Log.error(`no fork found`);
             return;
         }
 
@@ -2118,15 +2114,15 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         if (this.grab_op !== null) {
             const window = this.windows.get(this.grab_op.entity);
-            if (window) {
-                this.size_signals_unblock(window);
-                if (this.live_resize_signal !== null) window.meta.disconnect(this.live_resize_signal);
+            if (window) this.size_signals_unblock(window);
+            if (this.live_resize_signal !== null) {
+                window?.meta.disconnect(this.live_resize_signal);
+                this.live_resize_signal = null;
+                this.auto_tiler?.forest.end_resize(this);
             }
-            this.live_resize_signal = null;
             this.grab_op = null;
         }
 
-        this.auto_tiler?.forest.end_pushes();
         this.moved_by_mouse = false;
     }
 
