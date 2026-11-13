@@ -611,6 +611,38 @@ export class Forest extends Ecs.World {
         }
     }
 
+    /**
+     * Whether another node lies beyond an edge of a window, so that moving the edge moves a divider.
+     *
+     * Walks up the tree from the fork of the window, looking for a fork that is split along the axis of
+     * the edge and has the window on the side of that edge. The window is not next to another one on that
+     * side otherwise, e.g. its left edge is also the edge of the screen.
+     */
+    has_divider(fork_entity: Entity, win: Entity, edge: movement.Edge): boolean {
+        const horizontal = edge === 'left' || edge === 'right';
+        // A divider at the right (or bottom) edge has the window in its left (or top) child
+        const in_left_child = edge === 'right' || edge === 'bottom';
+
+        let child: Entity | null = null;
+        let entity: Entity | null = fork_entity;
+        while (entity) {
+            const fork = this.forks.get(entity);
+            if (!fork) return false;
+
+            if (fork.right && fork.is_horizontal() === horizontal) {
+                const is_left = child
+                    ? fork.left.is_fork(child)
+                    : fork.left.is_window(win) || fork.left.is_in_stack(win);
+                if (is_left === in_left_child) return true;
+            }
+
+            child = entity;
+            entity = this.parents.get(entity);
+        }
+
+        return false;
+    }
+
     /** Higher order function which forwards record events to our record method. */
     on_record(): (entity: Entity, parent: Entity, rect: Mtk.Rectangle) => void {
         return (e, p, a) => this.record(e, p, a);

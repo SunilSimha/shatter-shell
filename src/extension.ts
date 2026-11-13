@@ -30,8 +30,6 @@ const display = global.display;
 const wim = global.window_manager;
 const wom = global.workspace_manager;
 
-const Movement = movement.Movement;
-
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -1156,10 +1154,15 @@ export class Ext extends Ecs.System<ExtEvent> {
         // changing the window. Do not turn that into a tree resize.
         if (movements.length === 0) return;
 
+        // The start rect of the grab, to take the axes that are not resized from
+        const rect = grab_op.rect.copy();
+
         if (win.stack != null) {
             const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
-            crect.height += tab_dimension;
-            crect.y -= tab_dimension;
+            for (const r of [crect, rect]) {
+                r.height += tab_dimension;
+                r.y -= tab_dimension;
+            }
         }
 
         const top_level = forest.find_toplevel(this.workspace_id());
@@ -1167,12 +1170,29 @@ export class Ext extends Ecs.System<ExtEvent> {
             clampRect(crect, forest.forks.get(top_level)!.area);
         }
 
-        if (movements.every(movement => this.movement_is_valid(win, movement))) {
+        // An edge can only be resized if there is another window beyond it. If it is the edge of the screen,
+        // that part of the change is ignored, and the other axis is still resized.
+        const valid = movements.filter(m => {
+            const edge = movement.moved_edge(m);
+            return edge !== null && forest.has_divider(fork_entity, win.entity, edge);
+        });
+
+        if (valid.length > 0) {
+            if (valid.some(movement.is_horizontal)) {
+                rect.x = crect.x;
+                rect.width = crect.width;
+            }
+
+            if (valid.some(m => !movement.is_horizontal(m))) {
+                rect.y = crect.y;
+                rect.height = crect.height;
+            }
+
             this.live_resizing = live;
             this.drag_resizing = true;
             try {
-                for (const movement of movements) {
-                    forest.resize(this, fork_entity, fork, win.entity, movement, crect);
+                for (const m of valid) {
+                    forest.resize(this, fork_entity, fork, win.entity, m, rect);
                 }
             } finally {
                 this.live_resizing = false;
@@ -1195,34 +1215,6 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
 
         return null;
-    }
-
-    movement_is_valid(win: Window.ShellWindow, movement: movement.Movement) {
-        if ((movement & Movement.SHRINK) !== 0) {
-            if ((movement & Movement.DOWN) !== 0) {
-                const w = this.focus_selector.up(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.y + r.height > win.rect().y) return false;
-            } else if ((movement & Movement.UP) !== 0) {
-                const w = this.focus_selector.down(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.y + r.height < win.rect().y) return false;
-            } else if ((movement & Movement.LEFT) !== 0) {
-                const w = this.focus_selector.right(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.x + r.width < win.rect().x) return false;
-            } else if ((movement & Movement.RIGHT) !== 0) {
-                const w = this.focus_selector.left(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.x + r.width > win.rect().x) return false;
-            }
-        }
-
-        return true;
     }
 
     /** Triggered when a grab operation has been started */
