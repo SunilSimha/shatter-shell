@@ -97,9 +97,8 @@ export class Fork {
         const horizontal = this.is_horizontal();
         const min = this.left.min_length(tiler, ext, horizontal) + ext.gap_inner_half;
         const max = this.length() - this.right.min_length(tiler, ext, horizontal) - ext.gap_inner_half;
-        if (min > max) return Math.max(0, Math.min(this.length(), length));
-
-        return Math.max(min, Math.min(max, length));
+        const [low, high] = min > max ? [0, this.length()] : [min, max];
+        return Math.max(low, Math.min(high, length));
     }
 
     depth(): number {
