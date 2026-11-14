@@ -17,7 +17,6 @@ import { Fork } from './fork.js';
 import * as GrabOp from './grab_op.js';
 import * as Keybindings from './keybindings.js';
 import * as Lib from './lib.js';
-import * as movement from './movement.js';
 import * as node from './node.js';
 import * as PanelSettings from './panel_settings.js';
 import * as Settings from './settings.js';
@@ -29,8 +28,6 @@ import * as Window from './window.js';
 const display = global.display;
 const wim = global.window_manager;
 const wom = global.workspace_manager;
-
-const Movement = movement.Movement;
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -157,6 +154,15 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     /** Information about a current possible grab operation */
     grab_op: GrabOp.GrabOp | null = null;
+
+    /** Re-tiles the neighbours of the window that is being resized with the mouse */
+    live_resize_signal: SignalID | null = null;
+
+    /** Set while the neighbours are re-tiled during a mouse resize: no grid snap */
+    live_resizing: boolean = false;
+
+    /** Set while the tree is resized to a window that was resized with the mouse: see `Fork.pin_divider` */
+    drag_resizing: boolean = false;
 
     /** A display config update is triggered on a workspace addition */
     ignore_display_update: boolean = false;
@@ -300,6 +306,9 @@ export class Ext extends Ecs.System<ExtEvent> {
                         break;
 
                     case WindowEventType.Size:
+                        // During a grab the live resize keeps the tree current; a reflow would move the grabbed window
+                        if (this.grab_op) break;
+
                         if (this.auto_tiler && !win.is_maximized() && !win.meta.is_fullscreen()) {
                             this.auto_tiler.reflow(this, win.entity);
                         }
@@ -1103,43 +1112,64 @@ export class Ext extends Ecs.System<ExtEvent> {
                     }
                 }
             } else {
-                const fork_entity = this.auto_tiler.attached.get(win.entity);
-                if (fork_entity) {
-                    const forest = this.auto_tiler.forest;
-                    const fork = forest.forks.get(fork_entity);
-                    if (fork) {
-                        const movement = grab_op.operation(crect);
-
-                        // A click on a resize edge can begin and end a grab without
-                        // changing the window. Do not turn that into a tree resize.
-                        if (movement === Movement.NONE) return;
-
-                        if (win.stack != null) {
-                            const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
-                            crect.height += tab_dimension;
-                            crect.y -= tab_dimension;
-                        }
-
-                        const top_level = forest.find_toplevel(this.workspace_id());
-                        if (top_level) {
-                            clampRect(crect, forest.forks.get(top_level)!.area);
-                        }
-
-                        if (this.movement_is_valid(win, movement)) {
-                            forest.resize(this, fork_entity, fork, win.entity, movement, crect);
-                            forest.arrange(this, fork.workspace);
-                        } else {
-                            forest.tile(this, fork, fork.area);
-                        }
-                    } else {
-                        Log.error(`no fork component found`);
-                    }
-                } else {
-                    Log.error(`no fork entity found`);
-                }
+                this.resize_tree_to_window(win, false);
             }
         } else if (this.settings.get_snap_to_grid()) {
             this.tiler.snap(this, win);
+        }
+    }
+
+    /**
+     * Resizes the tiling tree to a window that is resized with the mouse, and moves the affected windows into place.
+     * If `live`, the grab is going on: Mutter resizes the grabbed window, so only the others
+     * are moved, without the grid snap.
+     */
+    resize_tree_to_window(win: Window.ShellWindow, live: boolean) {
+        const grab_op = this.grab_op;
+        if (!this.auto_tiler || !grab_op) return;
+
+        const forest = this.auto_tiler.forest;
+        const fork_entity = this.auto_tiler.attached.get(win.entity);
+        const fork = fork_entity && forest.forks.get(fork_entity);
+        if (!fork_entity || !fork) {
+            // A window that was detached during the grab has none, for every frame
+            if (!live) Log.error(`no fork found`);
+            return;
+        }
+
+        const crect = win.rect();
+        const moved = grab_op.moved_edges(crect);
+
+        // A click on a resize edge can begin and end a grab without changing the window
+        if (moved.length === 0) return;
+
+        if (win.stack != null) {
+            const tab_dimension = this.dpi * stack.TAB_HEIGHT_UNSCALED;
+            crect.height += tab_dimension;
+            crect.y -= tab_dimension;
+        }
+
+        const top_level = forest.find_toplevel(this.workspace_id());
+        if (top_level) {
+            clampRect(crect, forest.forks.get(top_level)!.area);
+        }
+
+        // Move the divider next to each edge that was resized, unless no other window lies beyond it
+        let resized = false;
+        this.live_resizing = live;
+        this.drag_resizing = true;
+        try {
+            resized = moved.map(edge => forest.resize_edge(this, fork_entity, win.entity, edge, crect)).includes(true);
+        } finally {
+            this.live_resizing = false;
+            this.drag_resizing = false;
+        }
+
+        if (resized) {
+            if (live) forest.requested.delete(win.entity);
+            forest.arrange(this, fork.workspace);
+        } else if (!live) {
+            forest.tile(this, fork, fork.area);
         }
     }
 
@@ -1152,34 +1182,6 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
 
         return null;
-    }
-
-    movement_is_valid(win: Window.ShellWindow, movement: movement.Movement) {
-        if ((movement & Movement.SHRINK) !== 0) {
-            if ((movement & Movement.DOWN) !== 0) {
-                const w = this.focus_selector.up(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.y + r.height > win.rect().y) return false;
-            } else if ((movement & Movement.UP) !== 0) {
-                const w = this.focus_selector.down(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.y + r.height < win.rect().y) return false;
-            } else if ((movement & Movement.LEFT) !== 0) {
-                const w = this.focus_selector.right(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.x + r.width < win.rect().x) return false;
-            } else if ((movement & Movement.RIGHT) !== 0) {
-                const w = this.focus_selector.left(this, win);
-                if (!w) return false;
-                const r = w.rect();
-                if (r.x + r.width > win.rect().x) return false;
-            }
-        }
-
-        return true;
     }
 
     /** Triggered when a grab operation has been started */
@@ -1198,6 +1200,12 @@ export class Ext extends Ecs.System<ExtEvent> {
                 this.grab_op = new GrabOp.GrabOp(entity, rect);
 
                 this.size_signals_block(win);
+
+                if (is_resize_op(op) && !is_keyboard_op(op) && this.auto_tiler?.attached.contains(entity)) {
+                    this.live_resize_signal = win.meta.connect('size-changed', () =>
+                        this.resize_tree_to_window(win, true),
+                    );
+                }
 
                 /** Display an overlay indicating where the window will be placed if dropped */
 
@@ -2096,6 +2104,11 @@ export class Ext extends Ecs.System<ExtEvent> {
         if (this.grab_op !== null) {
             const window = this.windows.get(this.grab_op.entity);
             if (window) this.size_signals_unblock(window);
+            if (this.live_resize_signal !== null) {
+                window?.meta.disconnect(this.live_resize_signal);
+                this.live_resize_signal = null;
+                this.auto_tiler?.forest.end_resize(this);
+            }
             this.grab_op = null;
         }
 

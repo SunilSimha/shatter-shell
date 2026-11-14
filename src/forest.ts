@@ -13,7 +13,7 @@ import * as geom from './geom.js';
 import { Log } from './log.js';
 import * as movement from './movement.js';
 import * as Node from './node.js';
-import { fmtRect } from './rectangle.js';
+import { edges, fmtRect, type Edge } from './rectangle.js';
 import { Stack } from './stack.js';
 
 const { Arena } = arena;
@@ -608,6 +608,108 @@ export class Forest extends Ecs.World {
             this.shrink_sibling(ext, fork_e, fork_c, is_left, movement, crect);
         } else {
             this.grow_sibling(ext, fork_e, fork_c, is_left, movement, crect);
+        }
+    }
+
+    /**
+     * The fork with the divider next to an edge of a window: the first one above the window that is split along the
+     * axis of the edge and has the window on that side. None if no other window lies beyond the edge.
+     */
+    divider_fork(fork_entity: Entity, win: Entity, edge: Edge): Fork.Fork | null {
+        const in_left = (fork: Fork.Fork) => fork.left.is_window(win) || fork.left.is_in_stack(win);
+        const horizontal = edge === 'left' || edge === 'right';
+        // A divider at the right (or bottom) edge has the window in its left (or top) child
+        return this.divider_above(fork_entity, in_left, horizontal, edge === 'right' || edge === 'bottom');
+    }
+
+    /**
+     * The first fork from `entity` upwards that is split along an axis and has the node that the search comes from
+     * in its left (or top) child, or in its right (or bottom) one. `in_left` is that test for the first fork.
+     */
+    private divider_above(
+        entity: Entity | null,
+        in_left: (fork: Fork.Fork) => boolean,
+        horizontal: boolean,
+        in_left_child: boolean,
+    ): Fork.Fork | null {
+        let child: Entity | null = null;
+        while (entity) {
+            const fork = this.forks.get(entity);
+            if (!fork) return null;
+
+            if (fork.right && fork.is_horizontal() === horizontal) {
+                const is_left = child ? fork.left.is_fork(child) : in_left(fork);
+                if (is_left === in_left_child) return fork;
+            }
+
+            child = entity;
+            entity = this.parents.get(entity);
+        }
+
+        return null;
+    }
+
+    /** The divider beyond the end (or the start) of the area of a fork */
+    private divider_beyond(fork: Fork.Fork, towards_end: boolean): Fork.Fork | null {
+        const in_left = (f: Fork.Fork) => f.left.is_fork(fork.entity);
+        return this.divider_above(this.parents.get(fork.entity), in_left, fork.is_horizontal(), towards_end);
+    }
+
+    /** Moves the divider next to an edge of a window to where the edge is now. False if there is none. */
+    resize_edge(ext: Ext, fork_entity: Entity, win: Entity, edge: Edge, crect: Mtk.Rectangle): boolean {
+        const fork = this.divider_fork(fork_entity, win, edge);
+        if (fork) this.move_divider(ext, fork, edges(crect)[edge]);
+        return fork !== null;
+    }
+
+    /**
+     * Moves the divider of a fork to a position. Windows that cannot shrink hold it back, and the rest is passed on to
+     * the divider beyond the fork, so that the windows there make room. When it goes back, the pushed dividers follow.
+     */
+    private move_divider(ext: Ext, fork: Fork.Fork, position: number) {
+        const length = position - fork.span()[0];
+        const excess = length - fork.clamp_length(this, ext, length);
+        if (excess !== 0) {
+            // Past the end of the area, the divider beyond its end is pushed; past the start, the one before it
+            const beyond = this.divider_beyond(fork, excess > 0);
+            if (beyond) {
+                const [start, end] = fork.span();
+                const edge = excess > 0 ? end + ext.gap_inner_half : start - ext.gap_inner_half;
+                beyond.pushed_from ??= edge;
+                this.move_divider(ext, beyond, edge + excess);
+            }
+        } else {
+            this.retract_pushes(ext, fork, position);
+        }
+
+        // The area of the fork may have changed
+        const clamped = fork.clamp_length(this, ext, position - fork.span()[0]);
+        fork.set_ratio(clamped).measure(this, ext, fork.area, this.on_record());
+    }
+
+    /** Moves the dividers beyond a fork back to where they were before the push, as far as `position` allows */
+    private retract_pushes(ext: Ext, fork: Fork.Fork, position: number) {
+        const horizontal = fork.is_horizontal();
+        const gap = ext.gap_inner_half * 2;
+
+        for (const towards_end of [true, false]) {
+            const beyond = this.divider_beyond(fork, towards_end);
+            if (!beyond || beyond.pushed_from === null) continue;
+
+            const room = towards_end
+                ? position + fork.right!.min_length(this, ext, horizontal) + gap
+                : position - fork.left.min_length(this, ext, horizontal) - gap;
+            const target = towards_end ? Math.max(beyond.pushed_from, room) : Math.min(beyond.pushed_from, room);
+            this.move_divider(ext, beyond, target);
+            if (target === beyond.pushed_from) beyond.pushed_from = null;
+        }
+    }
+
+    /** Ends the resize of a drag: forgets the pushes, and moves any divider that a pin left outside its fork back in */
+    end_resize(ext: Ext) {
+        for (const fork of this.forks.values()) {
+            fork.pushed_from = null;
+            fork.length_left = fork.clamp_length(this, ext, fork.length_left);
         }
     }
 
